@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, and verify watertightness.
-# Current Version: 1.0.4
-# Current Revision: 2026-11-15-r7
+# Current Version: 1.0.5
+# Current Revision: 2026-11-15-r8
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab.
@@ -432,10 +432,13 @@ def collect_files(src: Path) -> list:
         )
     return [src]
 
-
 def _handle_sigint(signum, frame):
     # Convert SIGINT/SIGTERM into SystemExit(130) so the finally-block in
-    # main() can still run cleanup (lock release, notification).
+    # main() can still run cleanup (lock release, notification). The flag
+    # is set here so an interrupt landing outside the per-file try block
+    # (between files or during summary) still notifies as interrupted.
+    global INTERRUPTED
+    INTERRUPTED = True
     raise SystemExit(130)
 
 
