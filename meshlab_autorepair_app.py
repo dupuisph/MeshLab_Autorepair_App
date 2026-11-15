@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, and verify watertightness.
-# Current Version: 1.0.1
-# Current Revision: 2026-11-15-r4
+# Current Version: 1.0.2
+# Current Revision: 2026-11-15-r5
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab.
@@ -140,8 +140,10 @@ def notify_result(status_kind: str, detail: str = "") -> None:
         elif OSA_BIN.exists() and os.access(OSA_BIN, os.X_OK):
             cmd = [
                 str(OSA_BIN), "-e",
-                f'display notification "{message}" with title "{title}" '
-                f'sound name "Glass"',
+                (
+                    f'display notification "{message}" with title "{title}" '
+                    f'sound name "Glass"'
+                ),
             ]
             subprocess.run(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -497,6 +499,7 @@ def main(argv=None) -> int:
     log(f"Log: {LOG_FILE}")
 
     acquire_lock()
+    prune_old_logs()
 
     results = []
     exit_code = 0
