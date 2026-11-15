@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, and verify watertightness.
-# Current Version: 1.0.3
-# Current Revision: 2026-11-15-r6
+# Current Version: 1.0.4
+# Current Revision: 2026-11-15-r7
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab.
@@ -281,8 +281,8 @@ def verify_watertight(ms) -> tuple:
     cur = ms.current_mesh()
     if cur.face_number() == 0 or cur.vertex_number() == 0:
         return "ERROR", [
-            "mesh is EMPTY — the pipeline deleted all geometry, or the "
-            "input contained none; refusing to award any verdict"
+            ("mesh is EMPTY — the pipeline deleted all geometry, or the "
+             "input contained none; refusing to award any verdict")
         ]
     topo = None
     try:
@@ -407,7 +407,7 @@ def repair_mesh(in_path: Path, outdir, maxholesize: int,
         apply_step(ms, label, candidates, degraded)
     verdict, detail_lines = verify_watertight(ms)
     base = Path(outdir) if outdir else in_path.parent
-    suffix = "_fixed" if verdict == "PASS" else "_fixed_REVIEW.stl"
+    suffix = "_fixed" if verdict == "PASS" else "_fixed_REVIEW"
     out_path = base / f"{in_path.stem}{suffix}.stl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ms.save_current_mesh(str(out_path))
