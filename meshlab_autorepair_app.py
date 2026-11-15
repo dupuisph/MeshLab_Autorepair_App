@@ -1,31 +1,37 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, and verify watertightness.
-# Current Version: 1.0.2
-# Current Revision: 2026-11-15-r5
+# Current Version: 1.0.3
+# Current Revision: 2026-11-15-r6
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab.
 
-Pipeline per mesh: remove duplicate faces/vertices and zero-area faces, drop
-isolated debris pieces, repair non-manifold edges and vertices, reorient faces
-coherently, optionally force normals outward, close holes up to a maximum
-boundary size, then verify watertightness from topological measures
+Pipeline per mesh: remove duplicate faces/vertices and null/zero-area faces,
+drop isolated debris pieces, repair non-manifold edges and vertices, reorient
+faces coherently, optionally force normals outward, close holes up to a
+maximum boundary size, then verify watertightness from topological measures
 (boundary_edges == 0 and number_holes == 0 => PASS).
 
-Outputs are named <stem>_fixed.stl on PASS and <stem>_fixed_REVIEW.stl when
-the verdict is FAIL or UNVERIFIED, so unconfirmed meshes never masquerade as
-clean. Self-intersecting faces are deliberately NOT auto-removed; that
-requires human judgment.
+Safety guards: the debris-removal filters delete ANY component below their
+thresholds, including the mesh's only component (observed: a 12-face cube
+reduced to 0 faces). repair_mesh therefore skips every debris step when the
+whole mesh sits at or below --minfaces, and verify_watertight returns ERROR
+for an empty mesh, so an emptied mesh can never earn PASS and ships as
+_fixed_REVIEW.stl.
 
-Filter names below are confirmed against the installed pymeshlab filter
-list (primary candidates verified 2026-11-15 via print_filter_list on the
-project venv). Steps whose filter does not exist in this version (notably
-zero-area-face removal, which has no matching filter in the installed list)
-keep legacy candidates and degrade with a loud WARNING plus version-local
-suggestions rather than failing the batch. Parameter spellings for the
-connected-component removal filters remain adaptive; the first live run
-logs which spelling applied.
+Outputs are named <stem>_fixed.stl on PASS and <stem>_fixed_REVIEW.stl when
+the verdict is FAIL, UNVERIFIED, or ERROR, so unconfirmed meshes never
+masquerade as clean. Self-intersecting faces are deliberately NOT
+auto-removed; that requires human judgment.
+
+Filter-name adaptivity: primary names and parameter spellings below are
+confirmed against installed pymeshlab 2025.7.post1 via print_filter_list,
+print_filter_parameter_list, and isolated probes (2026-11-15). Legacy
+spellings follow as fallbacks. A step whose every candidate fails is SKIPPED
+with a WARNING plus per-candidate first-line errors; the version's own
+introspection (pymeshlab.print_filter_list(),
+pymeshlab.print_filter_parameter_list('<filter>')) resolves the drift.
 
 Requires: pymeshlab (installed via this project's Poetry environment).
 Run inside the project:
@@ -47,8 +53,6 @@ MESHLAB_AUTOREPAIR_APP_LOG_DIR).
 """
 
 import argparse
-import contextlib
-import io
 import os
 import shutil
 import signal
@@ -231,28 +235,23 @@ def prune_old_logs() -> None:
             log(f"Retention: keeping {candidate.name} (within RETENTION_DAYS={RETENTION_DAYS}).")
 
 
-def suggest_filters(keyword: str) -> list:
-    """Best-effort diagnostic: capture the installed pymeshlab filter list
-    and return lines matching keyword."""
-    buf = io.StringIO()
+def as_percentage(value):
+    """Build the pymeshlab.PercentageValue typed object required by the
+    installed version's connected-component-by-diameter filter (a plain
+    int or float is rejected by apply_filter). Returns the object, or
+    None if construction fails — callers fall back or degrade loudly."""
     try:
-        with contextlib.redirect_stdout(buf):
-            pymeshlab.print_filter_list()
-    except Exception:
-        return []
-    return sorted(
-        {
-            line.strip()
-            for line in buf.getvalue().splitlines()
-            if keyword.lower() in line.lower() and line.strip()
-        }
-    )
+        return pymeshlab.PercentageValue(value)
+    except Exception as exc:
+        log(f"  WARNING: pymeshlab.PercentageValue({value}) construction failed ({exc}).")
+        return None
 
 
 def apply_step(ms, label: str, candidates: list, degraded: list) -> str:
     """Try each candidate (name, params) spelling; return the name applied.
-    On total failure, degrade with a WARNING plus version-local suggestions."""
-    last_err = None
+    Every candidate failure is logged (first line only — pymeshlab embeds
+    the entire filter list in its exception text, which is noise here).
+    On total failure, degrade with a WARNING instead of aborting the batch."""
     for name, params in candidates:
         try:
             ms.apply_filter(name, **params)
@@ -260,28 +259,31 @@ def apply_step(ms, label: str, candidates: list, degraded: list) -> str:
             log(f"  {label}: applied {applied}")
             return name
         except Exception as exc:
-            last_err = exc
+            err_text = str(exc).splitlines()
+            first = err_text[0] if err_text else type(exc).__name__
+            log(f"    {label}: {name} failed: {first}")
     degraded.append(label)
-    log(f"  WARNING: {label} SKIPPED — no working filter name "
-        f"({[c[0] for c in candidates]}); last error: {last_err}")
-    kw = next((k for k in ("close_holes", "non_manifold", "connected_component",
-                           "duplicate", "zero_area", "orient", "flip")
-               if k in label.lower()), None) or label.split()[0]
-    hits = suggest_filters(kw)
-    if hits:
-        log(f"    Installed filters matching '{kw}' in THIS pymeshlab version:")
-        for hit in hits[:10]:
-            log(f"      {hit}")
-    else:
-        log("    Run pymeshlab.print_filter_list() to inspect this version's names.")
+    log(f"  WARNING: {label} SKIPPED — no working candidate "
+        f"({[c[0] for c in candidates]})")
+    log("    Inspect this version's names/signatures via "
+        "pymeshlab.print_filter_list() and "
+        "pymeshlab.print_filter_parameter_list('<filter>')")
     return ""
 
 
 def verify_watertight(ms) -> tuple:
     """Returns (verdict, detail_lines). PASS requires boundary_edges == 0 and
     number_holes == 0 from topological measures (get_topological_measures,
-    confirmed in the installed version). Falls back to geometric measures
-    with an explicit UNVERIFIED label (volume is NOT proof of watertightness)."""
+    confirmed in the installed version). An empty mesh returns ERROR — an
+    empty mesh has trivially zero boundary edges and holes and must never
+    be rewarded for that. Falls back to geometric measures with an explicit
+    UNVERIFIED label (volume is NOT proof of watertightness)."""
+    cur = ms.current_mesh()
+    if cur.face_number() == 0 or cur.vertex_number() == 0:
+        return "ERROR", [
+            "mesh is EMPTY — the pipeline deleted all geometry, or the "
+            "input contained none; refusing to award any verdict"
+        ]
     topo = None
     try:
         topo = ms.get_topological_measures()
@@ -309,23 +311,39 @@ def verify_watertight(ms) -> tuple:
             return "PASS", lines
         return "FAIL", lines
     log("  WARNING: topological measures unavailable — verdict cannot be proven.")
+    geo = None
     try:
-        geo = ms.compute_geometric_measures()
-        vol = geo.get("mesh_volume")
-        return "UNVERIFIED", [
-            "topological measures unavailable; geometric fallback below",
-            f"mesh_volume={vol} (volume != proof of watertightness)",
-        ]
-    except Exception as exc:
-        return "UNVERIFIED", [f"no verification measures available ({exc})"]
+        geo = ms.get_geometric_measures()
+    except Exception:
+        try:
+            geo = ms.apply_filter("get_geometric_measures")
+        except Exception as exc:
+            return "UNVERIFIED", [f"no verification measures available ({exc})"]
+    vol = geo.get("mesh_volume") if isinstance(geo, dict) else None
+    return "UNVERIFIED", [
+        "topological measures unavailable; geometric fallback below",
+        f"mesh_volume={vol} (volume != proof of watertightness)",
+    ]
 
 
 def build_steps(maxholesize: int, minratio: float, minfaces: int) -> list:
-    """Ordered pipeline: (label, [(filter_name, params), ...]). Primary names
-    confirmed against the installed pymeshlab filter list 2026-11-15;
-    alternate spellings and legacy names follow as adaptive fallbacks.
-    Parameter spellings for the connected-component removal filters are
-    candidates until the first live run records which one applied."""
+    """Ordered pipeline: (label, [(filter_name, params), ...]). Names and
+    parameter spellings confirmed against installed pymeshlab 2025.7.post1
+    via print_filter_list, print_filter_parameter_list, and isolated probes
+    (2026-11-15). The debris steps are guarded in repair_mesh: if the whole
+    mesh is at or below --minfaces, they are skipped so small legitimate
+    models cannot be deleted wholesale (observed: a 12-face cube reduced to
+    0 faces by the face-count filter)."""
+    dia_pv = as_percentage(minratio)
+    dia_candidates = []
+    if dia_pv is not None:
+        dia_candidates.append(
+            ("meshing_remove_connected_component_by_diameter",
+             {"mincomponentdiag": dia_pv})
+        )
+    dia_candidates.append(
+        ("remove_isolated_pieces_wrt_diameter", {"minratio": minratio})
+    )
     return [
         ("remove duplicate faces", [
             ("meshing_remove_duplicate_faces", {}),
@@ -335,22 +353,14 @@ def build_steps(maxholesize: int, minratio: float, minfaces: int) -> list:
             ("meshing_remove_duplicate_vertices", {}),
             ("remove_duplicate_vertices", {}),
         ]),
-        ("remove zero-area faces", [
+        ("remove null / zero-area faces", [
+            ("meshing_remove_null_faces", {}),
             ("remove_zero_area_faces", {}),
-            ("meshing_remove_zero_area_faces", {}),
         ]),
-        ("remove isolated pieces (diameter)", [
-            ("meshing_remove_connected_component_by_diameter",
-             {"mincomponentdia": minratio}),
-            ("meshing_remove_connected_component_by_diameter",
-             {"minsize": minratio}),
-            ("remove_isolated_pieces_wrt_diameter", {"minratio": minratio}),
-        ]),
+        ("remove isolated pieces (diameter)", dia_candidates),
         ("remove isolated pieces (face count)", [
             ("meshing_remove_connected_component_by_face_number",
              {"mincomponentsize": minfaces}),
-            ("meshing_remove_connected_component_by_face_number",
-             {"minsize": minfaces}),
             ("remove_isolated_pieces_wrt_number_face_tri_edges", {"minsize": minfaces}),
         ]),
         ("repair non-manifold edges", [
@@ -380,16 +390,24 @@ def repair_mesh(in_path: Path, outdir, maxholesize: int,
                 minratio: float, minfaces: int) -> dict:
     """Runs the pipeline on one mesh; returns a result dict. Raises on
     load/save errors only — individual filter steps degrade with warnings.
-    Output naming depends on the verdict, so verification happens BEFORE the
-    output path is chosen and BEFORE saving."""
+    Debris steps are skipped when the whole mesh is at or below --minfaces
+    (whole-mesh guard). Output naming depends on the verdict, so
+    verification happens BEFORE the output path is chosen and BEFORE saving."""
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(str(in_path))
     degraded: list = []
     for label, candidates in build_steps(maxholesize, minratio, minfaces):
+        if label.startswith("remove isolated pieces"):
+            faces_now = ms.current_mesh().face_number()
+            if faces_now <= minfaces:
+                log(f"  {label}: SKIPPED (whole-mesh guard) — mesh currently "
+                    f"has {faces_now} faces, at or below --minfaces={minfaces}; "
+                    "debris removal would delete the entire model")
+                continue
         apply_step(ms, label, candidates, degraded)
     verdict, detail_lines = verify_watertight(ms)
     base = Path(outdir) if outdir else in_path.parent
-    suffix = "_fixed" if verdict == "PASS" else "_fixed_REVIEW"
+    suffix = "_fixed" if verdict == "PASS" else "_fixed_REVIEW.stl"
     out_path = base / f"{in_path.stem}{suffix}.stl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ms.save_current_mesh(str(out_path))
@@ -449,13 +467,14 @@ def main(argv=None) -> int:
     ap.add_argument("--maxholesize", type=int, default=30,
                     help="Max hole boundary size (edges) for hole closing (default 30)")
     ap.add_argument("--minratio", type=float, default=10.0,
-                    help="Debris removal ratio for isolated pieces (PyMeshLab "
-                         "percentage-style value, default 10). If the diameter "
-                         "step degrades, verify the parameter name/units via "
-                         "pymeshlab.print_filter_parameter_list on your version.")
+                    help="Debris removal diameter ratio for isolated pieces "
+                         "(percentage-style value passed to pymeshlab as a "
+                         "PercentageValue, default 10).")
     ap.add_argument("--minfaces", type=int, default=25,
-                    help="Min face count for the optional isolated-pieces pass "
-                         "(default 25)")
+                    help="Min face count for the isolated-pieces pass; also "
+                         "the whole-mesh guard threshold — a mesh at or below "
+                         "this face count skips debris removal entirely so "
+                         "small models cannot be deleted (default 25)")
     ap.add_argument("--dry-run", action="store_true",
                     help="List what would be processed; no side effects, no "
                          "log file, no lock, no notification")
@@ -476,7 +495,7 @@ def main(argv=None) -> int:
         for f in files:
             print(f"  {f}")
         print("Outputs would be written as <stem>_fixed.stl (PASS) or "
-              "<stem>_fixed_REVIEW.stl (FAIL/UNVERIFIED)")
+              "<stem>_fixed_REVIEW.stl (FAIL/UNVERIFIED/ERROR)")
         print(f"A live run would log to {LOG_DIR}/ and notify on completion.")
         return 0
 
