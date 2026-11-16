@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, disk-verify the saved artifact, and manage an input/output/processed folder workflow.
-# Current Version: 1.1.0
-# Current Revision: 2026-11-16-r2
+# Current Version: 1.1.1
+# Current Revision: 2026-11-16-r3
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab with a folder-based intake workflow.
@@ -482,8 +482,8 @@ def verify_saved_file(out_path: Path, faces_expected: int) -> tuple:
         faces_disk = ms_disk.current_mesh().face_number()
         if faces_disk < int(faces_expected * 0.9) or faces_disk > int(faces_expected * 1.1):
             disk_lines = list(disk_lines) + [
-                f"WARNING: face-count anomaly on re-load — saved {faces_expected} "
-                f"faces, re-loaded {faces_disk} (outside the heuristic +/-10% band)."
+                (f"WARNING: face-count anomaly on re-load — saved {faces_expected} "
+                 f"faces, re-loaded {faces_disk} (outside the heuristic +/-10% band).")
             ]
     return disk_verdict, disk_lines
 
@@ -539,10 +539,10 @@ def repair_mesh(in_path: Path, outdir, maxholesize: int,
     else:
         verdict = disk_verdict
         detail_lines = [
-            f"WARNING: in-memory verdict was {ram_verdict} but the on-disk verdict "
-            f"is {disk_verdict} — the STL round-trip altered the mesh (32-bit float "
-            "quantization and/or vertex re-welding on import); the disk verdict is "
-            "authoritative.",
+            (f"WARNING: in-memory verdict was {ram_verdict} but the on-disk verdict "
+             f"is {disk_verdict} — the STL round-trip altered the mesh (32-bit float "
+             "quantization and/or vertex re-welding on import); the disk verdict is "
+             "authoritative."),
         ] + disk_lines
     for line in detail_lines:
         log(f"  {line}")
@@ -671,8 +671,8 @@ def pick_files_interactive() -> list:
     PICK_FOLDER.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.run([str(OPEN_BIN), str(PICK_FOLDER)], check=False)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"WARNING: could not open the pick folder {PICK_FOLDER} in Finder ({exc}).")
     print(f"Type or drag-and-drop the path(s) of mesh file(s) to process into "
           f"the terminal, separated by spaces, then press Return (empty line "
           f"cancels; pick folder {PICK_FOLDER} was opened):")
@@ -731,8 +731,8 @@ def finalize_manifest(results: list, args) -> None:
     lines = [
         f"Manifest for run {RUN_STAMP}",
         f"pymeshlab: {version_string()}",
-        f"Tunables: maxholesize={args.maxholesize} "
-        f"minratio={args.minratio} minfaces={args.minfaces}",
+        (f"Tunables: maxholesize={args.maxholesize} "
+        f"minratio={args.minratio} minfaces={args.minfaces}"),
     ]
     for r in results:
         counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
@@ -984,8 +984,8 @@ def main(argv=None) -> int:
             if results and not INTERRUPTED:
                 try:
                     subprocess.run([str(OPEN_BIN), str(PROCESSED_DIR)], check=False)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log(f"WARNING: could not open {PROCESSED_DIR} in Finder ({exc}).")
         finally:
             release_lock()
             log(f"Done (elapsed {elapsed_secs()} s). Log: {LOG_FILE}")
