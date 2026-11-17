@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, disk-verify the saved artifact, and manage an input/output/processed folder workflow.
-# Current Version: 1.1.2
+# Current Version: 1.1.2 
 # Current Revision: 2026-11-16-r4
 # Previous Revision: none
 
