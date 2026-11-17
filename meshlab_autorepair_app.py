@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # ~/Projects/Meshlab_Autorepair_App/meshlab_autorepair_app.py
 # Batch STL mesh repair via PyMeshLab: clean junk geometry, repair non-manifold topology, close holes, disk-verify the saved artifact, and manage an input/output/processed folder workflow.
-# Current Version: 1.1.2 
-# Current Revision: 2026-11-16-r4
+# Current Version: 1.1.3
+# Current Revision: 2026-11-16-r5
 # Previous Revision: none
 
 """Batch mesh repair via PyMeshLab with a folder-based intake workflow.
@@ -660,7 +660,7 @@ def pick_files_interactive() -> list:
                     print("File selection cancelled — no files identified.")
                     return []
                 print(f"FILE PICKER FAILED (osascript exit {proc.returncode}): "
-                      f"{proc.stderr.strip() or '(no stderr text)')}")
+                      f"{proc.stderr.strip() or '(no stderr text)'}")
                 print("Falling back to terminal path entry.")
             raw = proc.stdout.strip()
             if not raw:
